@@ -11,6 +11,8 @@ import React, {
 } from 'react';
 import Particles from 'react-tsparticles';
 import { loadSlim } from 'tsparticles-slim';
+import anime from 'animejs';
+import gsap from 'gsap';
 import {
   motion,
   useTransform,
@@ -27,6 +29,7 @@ import './HeroRefined.css';
 
 const HeroRefined = () => {
   const containerRef = useRef(null);
+  const spectralCanvasRef = useRef(null);
 
   // ============================================================================
   // PROGRESSO VIRTUAL DE SCROLL (0 → 1) - BIDIRECIONAL
@@ -49,10 +52,207 @@ const HeroRefined = () => {
     // Normaliza posição do mouse (-1 a 1)
     const x = (clientX / innerWidth - 0.5) * 2;
     const y = (clientY / innerHeight - 0.5) * 2;
-    
+
     mouseX.set(x);
     mouseY.set(y);
+    spectralPointerRef.current = { x, y };
   }, [mouseX, mouseY]);
+
+  // ============================================================================
+  // CAMADA ESPECTRAL (CANVAS) - ANIMAÇÃO + INTERATIVIDADE
+  // ============================================================================
+  const spectralContextRef = useRef(null);
+  const spectralFieldsRef = useRef([
+    { x: 0.35, y: 0.4, r: 0.55, hue: 120, wobble: 0 },
+    { x: 0.65, y: 0.6, r: 0.45, hue: 150, wobble: 0 },
+    { x: 0.4, y: 0.7, r: 0.35, hue: 95, wobble: 0 },
+  ]);
+  const spectralPointerRef = useRef({ x: 0, y: 0 });
+  const spectralStateRef = useRef({ intensity: 0, hueShift: 0 });
+  const spectralAnimationFrame = useRef(null);
+  const spectralAnimeRef = useRef(null);
+  const spectralTimelineRef = useRef(null);
+  const prefersReducedMotionRef = useRef(false);
+
+  const setupSpectralCanvas = useCallback(() => {
+    const canvas = spectralCanvasRef.current;
+    if (!canvas) return;
+
+    const context = canvas.getContext('2d');
+    spectralContextRef.current = context;
+
+    const resize = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
+      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+
+    resize();
+    window.addEventListener('resize', resize);
+
+    return () => {
+      window.removeEventListener('resize', resize);
+    };
+  }, []);
+
+  const renderSpectralFrame = useCallback(() => {
+    const canvas = spectralCanvasRef.current;
+    const context = spectralContextRef.current;
+    if (!canvas || !context) return;
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const viewWidth = canvas.width / dpr;
+    const viewHeight = canvas.height / dpr;
+    const pointer = spectralPointerRef.current;
+    const { intensity, hueShift } = spectralStateRef.current;
+
+    context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    context.clearRect(0, 0, viewWidth, viewHeight);
+    context.fillStyle = 'rgba(3, 6, 4, 0.96)';
+    context.fillRect(0, 0, viewWidth, viewHeight);
+    context.globalCompositeOperation = 'screen';
+
+    spectralFieldsRef.current.forEach((field, index) => {
+      const warpX = pointer.x * 0.04;
+      const warpY = pointer.y * 0.04;
+      const centerX = (field.x + warpX + field.wobble * 0.08) * viewWidth;
+      const centerY = (field.y + warpY - field.wobble * 0.05) * viewHeight;
+
+      const innerRadius = Math.max(120, viewWidth * 0.08);
+      const outerRadius = Math.max(viewWidth, viewHeight) * (field.r + 0.25 * intensity);
+      const hue = field.hue + hueShift + index * 6;
+
+      const gradient = context.createRadialGradient(
+        centerX,
+        centerY,
+        innerRadius,
+        centerX,
+        centerY,
+        outerRadius
+      );
+
+      gradient.addColorStop(0, `hsla(${hue}, 96%, 58%, ${0.55 * intensity})`);
+      gradient.addColorStop(0.4, `hsla(${hue + 12}, 88%, 54%, ${0.35 * intensity})`);
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+      context.fillStyle = gradient;
+      context.beginPath();
+      context.arc(centerX, centerY, outerRadius, 0, Math.PI * 2);
+      context.fill();
+    });
+
+    context.globalCompositeOperation = 'lighter';
+  }, []);
+
+  const renderSpectralLoop = useCallback(() => {
+    renderSpectralFrame();
+    spectralAnimationFrame.current = requestAnimationFrame(renderSpectralLoop);
+  }, [renderSpectralFrame]);
+
+  const startSpectralAnime = useCallback(() => {
+    if (prefersReducedMotionRef.current) return;
+
+    if (!spectralAnimeRef.current) {
+      spectralAnimeRef.current = anime.timeline({ autoplay: false, loop: true, direction: 'alternate' });
+
+      spectralAnimeRef.current
+        .add({
+          targets: spectralFieldsRef.current,
+          x: () => 0.2 + Math.random() * 0.55,
+          y: () => 0.2 + Math.random() * 0.55,
+          r: () => 0.32 + Math.random() * 0.35,
+          hue: () => 98 + Math.random() * 36,
+          duration: 7200,
+          easing: 'easeInOutSine',
+        })
+        .add(
+          {
+            targets: spectralFieldsRef.current,
+            wobble: () => (Math.random() - 0.5) * 0.35,
+            duration: 5400,
+            easing: 'easeInOutQuad',
+          },
+          0
+        );
+    }
+
+    spectralAnimeRef.current.play();
+
+    if (!spectralAnimationFrame.current) {
+      spectralAnimationFrame.current = requestAnimationFrame(renderSpectralLoop);
+    }
+  }, [renderSpectralLoop]);
+
+  const stopSpectralAnime = useCallback(
+    (reset = false) => {
+      spectralAnimeRef.current?.pause();
+
+      if (spectralAnimationFrame.current) {
+        cancelAnimationFrame(spectralAnimationFrame.current);
+        spectralAnimationFrame.current = null;
+      }
+
+      if (reset) {
+        spectralStateRef.current.intensity = 0;
+        spectralStateRef.current.hueShift = 0;
+        renderSpectralFrame();
+      }
+    },
+    [renderSpectralFrame]
+  );
+
+  useEffect(() => {
+    const cleanupCanvas = setupSpectralCanvas();
+
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const updateMotionPreference = () => {
+      prefersReducedMotionRef.current = mediaQuery.matches;
+      if (mediaQuery.matches) {
+        stopSpectralAnime(true);
+        if (spectralCanvasRef.current) {
+          spectralCanvasRef.current.style.opacity = '0';
+        }
+      } else if (scrollProgress.get() >= 1) {
+        startSpectralAnime();
+        spectralTimelineRef.current?.play();
+        spectralTimelineRef.current?.progress(
+          Math.max(0, Math.min(1, scrollProgress.get() - 1))
+        );
+      }
+    };
+
+    updateMotionPreference();
+    mediaQuery.addEventListener('change', updateMotionPreference);
+
+    spectralTimelineRef.current = gsap.timeline({ paused: true, defaults: { ease: 'power2.out' } });
+    spectralTimelineRef.current.to(spectralStateRef.current, {
+      intensity: 0.95,
+      duration: 1.1,
+      onUpdate: renderSpectralFrame,
+    });
+    spectralTimelineRef.current.to(
+      spectralStateRef.current,
+      {
+        hueShift: 24,
+        duration: 5,
+        yoyo: true,
+        repeat: -1,
+        ease: 'sine.inOut',
+        onUpdate: renderSpectralFrame,
+      },
+      0.35
+    );
+
+    return () => {
+      mediaQuery.removeEventListener('change', updateMotionPreference);
+      cleanupCanvas?.();
+      spectralTimelineRef.current?.kill();
+      stopSpectralAnime(true);
+    };
+  }, [renderSpectralFrame, setupSpectralCanvas, startSpectralAnime, stopSpectralAnime, scrollProgress]);
 
   // ============================================================================
   // TRAVA / LIBERA SCROLL DO BODY - DINÂMICO
@@ -165,7 +365,35 @@ const HeroRefined = () => {
     return () => unsubscribe();
   }, [transitionStarted, scrollProgress]);
 
-    // Libera scroll quando atinge 100%
+  useEffect(() => {
+    const unsubscribe = scrollProgress.on('change', (latest) => {
+      const spectralLayer = spectralCanvasRef.current;
+      const takeover = Math.max(0, Math.min(1, latest - 1));
+
+      if (spectralLayer) {
+        spectralLayer.style.opacity = (takeover * 0.92).toFixed(3);
+      }
+
+      if (prefersReducedMotionRef.current) return;
+
+      if (takeover > 0) {
+        startSpectralAnime();
+        spectralTimelineRef.current?.play();
+        spectralTimelineRef.current?.progress(Math.min(1, takeover));
+      } else {
+        const timeline = spectralTimelineRef.current;
+        if (timeline) {
+          timeline.progress(0);
+          timeline.pause();
+        }
+        stopSpectralAnime(true);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [scrollProgress, startSpectralAnime, stopSpectralAnime]);
+
+  // Libera scroll quando atinge 100%
   const unlockScroll = useCallback(() => {
     if (!isLocked) return;
     setIsLocked(false);
@@ -246,6 +474,11 @@ const HeroRefined = () => {
 
       const currentY = event.touches[0].clientY;
       const deltaY = touchStartY.current - currentY;
+
+      spectralPointerRef.current = {
+        x: (event.touches[0].clientX / window.innerWidth - 0.5) * 2,
+        y: (currentY / window.innerHeight - 0.5) * 2,
+      };
 
       const current = scrollProgress.get();
 
@@ -524,6 +757,7 @@ const HeroRefined = () => {
       onMouseMove={handleMouseMove}
     >
       <div className="hero-refined-sticky">
+        <canvas className="spectral-gradient-layer" ref={spectralCanvasRef} />
         {/* Background texture */}
         <div className="background-texture" />
 
