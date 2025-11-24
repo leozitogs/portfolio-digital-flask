@@ -324,10 +324,10 @@ const HeroRefined = () => {
       // ✅ Background escurece (0.1 → 0.6)
       if (heroSticky) {
         const bgProgress = Math.max(0, Math.min(1, (progress - 0.1) / 0.5));
-        const r = Math.round(255 - (bgProgress * 185)); // 255 → 70 (cinza escuro)
-        const g = Math.round(255 - (bgProgress * 185));
-        const b = Math.round(255 - (bgProgress * 185));
-        heroSticky.style.backgroundColor = `rgb(${r}, ${g}, ${b})`;
+        const start = 16; // fallback escuro
+        const end = 6; // alvo ainda mais escuro
+        const shade = Math.round(start - (start - end) * bgProgress);
+        heroSticky.style.backgroundColor = `rgb(${shade}, ${shade}, ${shade + 1})`;
         
         // ✅ SINALIZADOR: Atualiza CSS variable no body para Header detectar
         document.documentElement.style.setProperty('--hero-bg-dark', bgProgress.toFixed(2));
